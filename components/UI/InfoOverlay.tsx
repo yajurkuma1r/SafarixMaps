@@ -107,9 +107,10 @@ export default function InfoOverlay({ type, onClose }: InfoOverlayProps) {
                             </div>
                             <h3 style={{ color: 'white', marginTop: '24px', marginBottom: '12px', fontSize: '18px' }}>Core Technologies</h3>
                             <ul style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                <li>✨ <strong>Live Risk Scoring:</strong> Dynamic safety analysis of paths.</li>
+                                <li>✨ <strong>ML Risk Scoring:</strong> Dynamic safety analysis powered by Random Forest &amp; XGBoost.</li>
                                 <li>✨ <strong>Dual Routing:</strong> Always gives you the choice between the absolute Safest and the absolute Fastest route.</li>
-                                <li>✨ <strong>Crime Heatmaps:</strong> Visual spatial awareness overlay.</li>
+                                <li>✨ <strong>Crime Heatmaps:</strong> Visual spatial awareness overlay calibrated to crime density.</li>
+                                <li>✨ <strong>Predictive Safety:</strong> Sub-5ms spatial risk classification and en-route hazard warnings.</li>
                             </ul>
                         </>
                     ) : (

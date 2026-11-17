@@ -1,0 +1,1 @@
+# SafarixMaps API Package

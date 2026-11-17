@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "trained_at": "2026-11-16T15:28:27.701762",
+  "dataset": {
+    "source_file": "SafarixMaps_Combined_Crime_Dataset.xlsx",
+    "station_records": 166,
+    "features_count": 19,
+    "features": [
+      "lat",
+      "long",
+      "dist_cp_km",
+      "dist_north_km",
+      "dist_south_km",
+      "dist_west_km",
+      "dist_east_km",
+      "dist_airport_km",
+      "dist_old_delhi_km",
+      "dist_rohini_km",
+      "delta_lat",
+      "delta_lon",
+      "radial_dist",
+      "bearing_deg",
+      "dist_nearest_st_km",
+      "dist_second_st_km",
+      "st_density_3km",
+      "st_density_5km",
+      "st_density_8km"
+    ],
+    "density_cutoffs": {
+      "q33": 86.02758678760499,
+      "q66": 196.7483361294
+    },
+    "log_density_min": 1.6855631590208813,
+    "log_density_max": 6.675855394887775
+  },
+  "target": {
+    "type": "crime_density_tertiles",
+    "classes": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "proxy_description": "Objective spatial crime density (crimes/km\u00b2) grouped into balanced tertiles (Low, Medium, High). Explicitly distinguishes geographic crime risk from individual future crime incident occurrences."
+  },
+  "models_saved": [
+    "rf_classifier.joblib",
+    "rf_regressor.joblib",
+    "xgb_classifier.joblib",
+    "xgb_regressor.joblib",
+    "extractor.joblib"
+  ]
+}

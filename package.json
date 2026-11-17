@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backend": "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload",
+    "train": "python -m backend.app.ml.trainer",
+    "test:backend": "python -m pytest backend/tests -v",
+    "test:ml": "python -m pytest backend/tests/test_models.py -v"
   },
   "dependencies": {
     "@types/maplibre-gl": "^1.13.2",
