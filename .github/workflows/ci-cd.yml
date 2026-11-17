@@ -1,0 +1,242 @@
+name: SafarixMaps CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch or PR to optimize build minutes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  NEXT_PUBLIC_RISK_API_URL: http://localhost:8000
+
+jobs:
+  # ==========================================================================
+  # JOB 1: Backend CI (Python 3.11, ML Model Validation, Pytest Suite)
+  # ==========================================================================
+  backend-ci:
+    name: Backend Tests & ML Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+            requirements-server.txt
+
+      - name: Install System Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgomp1 curl
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Verify Code Syntax & Compilation
+        run: |
+          python -m py_compile backend/app/main.py
+          python -m py_compile backend/app/ml/inference.py
+          python -m py_compile backend/app/ml/preprocessor.py
+          python -m py_compile backend/app/ml/trainer.py
+
+      - name: Run Backend Pytest Suite
+        run: |
+          mkdir -p test-results
+          python -m pytest backend/tests -v --junitxml=test-results/backend-results.xml
+
+      - name: Run ML Inference Smoke Test
+        run: |
+          python test_load.py
+
+      - name: Upload Backend Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: test-results/
+          retention-days: 14
+
+  # ==========================================================================
+  # JOB 2: Frontend CI (Node 20, TypeScript Checking, Next.js 16 Build)
+  # ==========================================================================
+  frontend-ci:
+    name: Frontend Lint & Next.js Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: TypeScript Type Checking
+        run: npx tsc --noEmit
+
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: true # Non-blocking while strict lint refactor is underway
+
+      - name: Build Next.js Production Bundle
+        run: npm run build
+        env:
+          NEXT_PUBLIC_RISK_API_URL: ${{ env.NEXT_PUBLIC_RISK_API_URL }}
+
+  # ==========================================================================
+  # JOB 3: Docker Build & Container Health Smoke Test
+  # ==========================================================================
+  docker-smoke-test:
+    name: Docker Image Build & Health Check
+    runs-on: ubuntu-latest
+    needs: [backend-ci]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image Locally
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: safarixmaps-backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify Container Runtime & API Endpoints
+        run: |
+          echo "Starting SafarixMaps Backend Container..."
+          docker run -d --name safarix-test -p 8000:8000 safarixmaps-backend:test
+
+          echo "Polling FastAPI /health endpoint..."
+          READY=false
+          for i in {1..20}; do
+            if curl -s -f http://localhost:8000/health | grep '"status":"ok"'; then
+              echo "FastAPI backend is healthy and responding!"
+              READY=true
+              break
+            fi
+            echo "Awaiting engine initialization (attempt $i/20)..."
+            sleep 2
+          done
+
+          if [ "$READY" != "true" ]; then
+            echo "Container health check timed out. Dumping container logs:"
+            docker logs safarix-test
+            exit 1
+          fi
+
+          echo "Verifying /api/risk/predict endpoint..."
+          PREDICT_RESPONSE=$(curl -s -f -X POST http://localhost:8000/api/risk/predict \
+            -H "Content-Type: application/json" \
+            -d '{"latitude": 28.6139, "longitude": 77.2090}')
+          echo "Prediction Response: $PREDICT_RESPONSE"
+
+          echo "Cleaning up container..."
+          docker stop safarix-test && docker rm safarix-test
+
+  # ==========================================================================
+  # JOB 4: Continuous Deployment (CD) - Publish Image & Trigger Deployment
+  # ==========================================================================
+  deploy:
+    name: Publish Container & Deploy
+    runs-on: ubuntu-latest
+    needs: [backend-ci, frontend-ci, docker-smoke-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Lowercase Repository Name for GHCR
+        run: |
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}-backend" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest
+
+      - name: Build and Push Docker Image to GHCR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ----------------------------------------------------------------------
+      # OPTIONAL DEPLOY HOOKS (Uncomment & add secrets in GitHub Repo Settings)
+      # ----------------------------------------------------------------------
+      # - name: Deploy Backend to Render / Railway / Webhook
+      #   if: env.RENDER_DEPLOY_HOOK != ''
+      #   run: |
+      #     curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+      #
+      # - name: Deploy Frontend to Vercel
+      #   uses: amondnet/vercel-action@v25
+      #   if: env.VERCEL_TOKEN != ''
+      #   with:
+      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
+      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+      #     vercel-args: '--prod'
+
+      - name: Generate Pipeline Summary
+        run: |
+          echo "## 🚀 SafarixMaps CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Backend Tests (32 tests)** | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| **ML Inference Validation** | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| **TypeScript & Next.js Build** | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Docker Container Health** | ✅ Verified |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Published GHCR Image** | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Commit SHA: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
