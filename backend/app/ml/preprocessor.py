@@ -169,3 +169,74 @@ def load_crime_dataset(file_path: Optional[str] = None) -> Tuple[pd.DataFrame, p
             raise ValueError(f"Missing required column '{c}' in Crime_Source_Raw")
 
     return csr, esr, metadata
+
+
+def register_compatibility_aliases():
+    """
+    Ensure complete parent package hierarchy registration in sys.modules
+    so serialized ML artifacts referencing 'backend.app.*' (such as extractor.joblib)
+    can be deserialized in environments where the root package is 'app' (e.g. Vercel),
+    and vice versa.
+
+    This registers:
+      - sys.modules['backend'] with __path__ set
+      - sys.modules['backend.app']
+      - sys.modules['backend.app.ml']
+      - sys.modules['backend.app.ml.preprocessor']
+      - sys.modules['backend.app.ml.inference']
+      - sys.modules['backend.app.config']
+      - sys.modules['backend.app.api']
+    and maintains parent-to-child attribute links (e.g. backend.app.ml.preprocessor).
+    """
+    import sys
+    import types
+    import importlib
+
+    # 1. Eagerly import key submodules if available to ensure they exist in sys.modules
+    for target in ("app.ml.preprocessor", "app.ml.inference", "app.config"):
+        if target not in sys.modules and ("backend." + target) not in sys.modules:
+            try:
+                importlib.import_module(target)
+            except ImportError:
+                try:
+                    importlib.import_module("backend." + target)
+                except ImportError:
+                    pass
+
+    # 2. Ensure root 'backend' module exists in sys.modules with __path__ set
+    if "backend" not in sys.modules:
+        backend_mod = types.ModuleType("backend")
+        backend_mod.__path__ = []
+        backend_mod.__doc__ = "SafarixMaps backend compatibility package."
+        sys.modules["backend"] = backend_mod
+    else:
+        backend_mod = sys.modules["backend"]
+        if not hasattr(backend_mod, "__path__"):
+            backend_mod.__path__ = []
+
+    # 3. Mirror all app.* modules to backend.app.* and vice-versa
+    for mod_name in list(sys.modules.keys()):
+        if mod_name == "app" or mod_name.startswith("app."):
+            backend_name = "backend." + mod_name
+            if backend_name not in sys.modules:
+                sys.modules[backend_name] = sys.modules[mod_name]
+        elif mod_name == "backend.app" or mod_name.startswith("backend.app."):
+            app_name = mod_name[len("backend."):]
+            if app_name not in sys.modules:
+                sys.modules[app_name] = sys.modules[mod_name]
+
+    # 4. Wire parent-to-child attribute access across the entire backend hierarchy
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("backend."):
+            parts = mod_name.split(".")
+            for i in range(1, len(parts)):
+                parent_name = ".".join(parts[:i])
+                child_attr = parts[i]
+                child_name = ".".join(parts[:i + 1])
+                if parent_name in sys.modules and child_name in sys.modules:
+                    setattr(sys.modules[parent_name], child_attr, sys.modules[child_name])
+
+
+# Auto-register aliases on module import
+register_compatibility_aliases()
+

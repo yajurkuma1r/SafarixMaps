@@ -13,6 +13,7 @@ from .preprocessor import (
     haversine_vectorized,
     is_valid_coordinate,
     is_within_delhi_region,
+    register_compatibility_aliases,
 )
 
 logger = logging.getLogger("safarixmaps.inference")
@@ -49,6 +50,7 @@ class RiskInferenceEngine:
 
     def _load_artifacts(self):
         try:
+            register_compatibility_aliases()
             logger.info(f"Loading ML artifacts from {self.artifacts_dir}...")
             rf_cls_path = self.artifacts_dir / "rf_classifier.joblib"
             rf_reg_path = self.artifacts_dir / "rf_regressor.joblib"

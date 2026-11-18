@@ -6,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.risk import router as risk_router
 from .api.ml_routes import router as ml_router
 from .ml.inference import RiskInferenceEngine
+from .ml.preprocessor import register_compatibility_aliases
+
+# Ensure compatibility alias for Vercel deployment where package is imported as 'app'
+register_compatibility_aliases()
 
 logger = logging.getLogger("safarixmaps.main")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
